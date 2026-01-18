@@ -1,0 +1,63 @@
+// Proste reguły Firestore dla Apteczka Seniora
+// SKOPIUJ TĘ ZAWARTOŚĆ DO: Firebase Console -> Firestore Database -> Rules
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Pomocnicza funkcja - czy użytkownik jest zalogowany
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Pomocnicza funkcja - czy użytkownik jest właścicielem dokumentu
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+    
+    // ===== UŻYTKOWNICY =====
+    match /users/{userId} {
+      // Użytkownik może czytać i pisać tylko swoje dane
+      allow read, write: if isAuthenticated() && isOwner(userId);
+    }
+    
+    // ===== LEKI =====
+    match /medications/{medicationId} {
+      // Użytkownik może zarządzać swoimi lekami
+      allow read, write: if isAuthenticated() && 
+        (resource == null || resource.data.userId == request.auth.uid);
+      
+      // Pozwól na tworzenie nowych dokumentów
+      allow create: if isAuthenticated() && 
+        request.resource.data.userId == request.auth.uid;
+    }
+    
+    // ===== HARMONOGRAMY =====
+    match /schedules/{scheduleId} {
+      // Użytkownik może zarządzać swoimi harmonogramami
+      allow read, write: if isAuthenticated() && 
+        (resource == null || resource.data.userId == request.auth.uid);
+      
+      // Pozwól na tworzenie nowych dokumentów
+      allow create: if isAuthenticated() && 
+        request.resource.data.userId == request.auth.uid;
+    }
+    
+    // ===== LOGI DAWEK =====
+    match /doseLogs/{logId} {
+      // Użytkownik może zarządzać swoimi logami
+      allow read, write: if isAuthenticated() && 
+        (resource == null || resource.data.userId == request.auth.uid);
+      
+      // Pozwól na tworzenie nowych dokumentów
+      allow create: if isAuthenticated() && 
+        request.resource.data.userId == request.auth.uid;
+    }
+    
+    // ===== ZAPROSZENIA =====
+    match /invitations/{code} {
+      // Wszyscy zalogowani mogą czytać i tworzyć zaproszenia
+      allow read, write: if isAuthenticated();
+    }
+  }
+}
