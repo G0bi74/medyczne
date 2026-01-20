@@ -22,8 +22,9 @@ import {
 import {
   generateDosesForDate,
   GeneratedDose,
-  markDoseAsTakenLocal,
-  markDoseAsSkippedLocal,
+  markDoseAsTakenWithPersistence,
+  markDoseAsSkippedWithPersistence,
+  loadDoseStatusesFromFirebase,
 } from '../../services/doses/doseGenerator';
 
 interface ScheduleScreenProps {
@@ -72,6 +73,11 @@ export const ScheduleScreen: React.FC<ScheduleScreenProps> = ({ navigation }) =>
     if (!user) return;
     
     try {
+      // Load saved dose statuses for the week
+      const today = startOfDay(new Date());
+      const weekEnd = addDays(today, 7);
+      await loadDoseStatusesFromFirebase(user.id, today, weekEnd);
+      
       const [meds, scheds] = await Promise.all([
         getMedicationsByUser(user.id),
         getSchedulesByUser(user.id),
@@ -99,8 +105,9 @@ export const ScheduleScreen: React.FC<ScheduleScreenProps> = ({ navigation }) =>
 
   const updateMedicationInStore = useMedicationStore((state) => state.updateMedication);
 
-  const handleTakeDose = (dose: GeneratedDose) => {
-    markDoseAsTakenLocal(dose.id);
+  const handleTakeDose = async (dose: GeneratedDose) => {
+    // Save to Firebase for persistence
+    await markDoseAsTakenWithPersistence(dose);
     
     // Update dose status in local state
     const dateKey = format(dose.scheduledTime, 'yyyy-MM-dd');
@@ -128,8 +135,10 @@ export const ScheduleScreen: React.FC<ScheduleScreenProps> = ({ navigation }) =>
     }
   };
 
-  const handleSkipDose = (dose: GeneratedDose) => {
-    markDoseAsSkippedLocal(dose.id);
+  const handleSkipDose = async (dose: GeneratedDose) => {
+    // Save to Firebase for persistence
+    await markDoseAsSkippedWithPersistence(dose);
+    
     // Update local state
     const dateKey = format(dose.scheduledTime, 'yyyy-MM-dd');
     setAllDoses(prev => {

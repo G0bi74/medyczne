@@ -9,13 +9,17 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { format, isToday, isYesterday, differenceInHours } from 'date-fns';
+import { format, isToday, isYesterday, differenceInHours, differenceInMinutes, startOfDay, addDays } from 'date-fns';
 import { pl } from 'date-fns/locale';
 import { Card } from '../../components';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '../../constants/theme';
-import { useAuthStore, useMedicationStore, useDoseLogStore } from '../../store';
-import { getDoseLogsByUser } from '../../services/api/medicationService';
-import { DoseLog } from '../../types';
+import { useAuthStore, useMedicationStore, useScheduleStore } from '../../store';
+import { getSchedulesByUser, getMedicationsByUser } from '../../services/api/medicationService';
+import { 
+  generateTodaysDoses, 
+  loadDoseStatusesFromFirebase,
+  GeneratedDose,
+} from '../../services/doses/doseGenerator';
 
 interface NotificationsScreenProps {
   navigation: any;
@@ -39,53 +43,75 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
 
   const user = useAuthStore((state) => state.user);
   const medications = useMedicationStore((state) => state.medications);
-  const doseLogs = useDoseLogStore((state) => state.doseLogs);
-  const setDoseLogs = useDoseLogStore((state) => state.setDoseLogs);
+  const setMedications = useMedicationStore((state) => state.setMedications);
+  const schedules = useScheduleStore((state) => state.schedules);
+  const setSchedules = useScheduleStore((state) => state.setSchedules);
 
   const loadNotifications = async () => {
     if (!user) return;
 
     try {
-      const logs = await getDoseLogsByUser(user.id);
-      setDoseLogs(logs);
+      // Load saved dose statuses from Firebase
+      const today = startOfDay(new Date());
+      const tomorrow = addDays(today, 1);
+      await loadDoseStatusesFromFirebase(user.id, today, tomorrow);
+      
+      // Load medications and schedules
+      const [meds, scheds] = await Promise.all([
+        getMedicationsByUser(user.id),
+        getSchedulesByUser(user.id),
+      ]);
+      setMedications(meds);
+      setSchedules(scheds);
 
-      // Generate notifications from dose logs and medications
+      // Generate today's doses from schedules
+      const todaysDoses = generateTodaysDoses(scheds, meds, user.id);
+
+      // Generate notifications
       const notifs: NotificationItem[] = [];
+      const now = new Date();
 
-      // Missed doses
-      logs
-        .filter((log) => log.status === 'missed')
-        .forEach((log) => {
-          const medication = medications.find((m) => m.id === log.medicationId);
+      // Missed doses (pending and overdue by more than 30 minutes, or marked as missed)
+      todaysDoses
+        .filter((dose) => {
+          if (dose.status === 'missed') return true;
+          if (dose.status === 'pending') {
+            const minutesOverdue = differenceInMinutes(now, dose.scheduledTime);
+            return minutesOverdue > 30;
+          }
+          return false;
+        })
+        .forEach((dose) => {
+          const medication = meds.find((m) => m.id === dose.medicationId);
           notifs.push({
-            id: `missed_${log.id}`,
+            id: `missed_${dose.id}`,
             type: 'missed_dose',
             title: 'Pominięta dawka',
-            message: `Nie przyjęto leku ${medication?.name || 'Lek'} o ${format(log.scheduledTime, 'HH:mm')}`,
-            timestamp: log.scheduledTime,
+            message: `Nie przyjęto leku ${medication?.name || 'Lek'} o ${format(dose.scheduledTime, 'HH:mm')}`,
+            timestamp: dose.scheduledTime,
             read: false,
-            data: { logId: log.id, medicationId: log.medicationId },
+            data: { doseId: dose.id, medicationId: dose.medicationId },
           });
         });
 
-      // Recent taken doses (last 24h)
-      logs
-        .filter((log) => log.status === 'taken' && differenceInHours(new Date(), log.takenAt!) < 24)
-        .forEach((log) => {
-          const medication = medications.find((m) => m.id === log.medicationId);
+      // Recent taken doses (from today)
+      todaysDoses
+        .filter((dose) => dose.status === 'taken' && dose.takenAt)
+        .forEach((dose) => {
+          const medication = meds.find((m) => m.id === dose.medicationId);
           notifs.push({
-            id: `taken_${log.id}`,
+            id: `taken_${dose.id}`,
             type: 'taken',
             title: 'Lek przyjęty',
             message: `Przyjęto ${medication?.name || 'Lek'}`,
-            timestamp: log.takenAt!,
+            timestamp: dose.takenAt!,
             read: true,
-            data: { logId: log.id, medicationId: log.medicationId },
+            data: { doseId: dose.id, medicationId: dose.medicationId },
           });
         });
 
       // Low quantity medications
-      medications
+      meds
         .filter((m) => m.currentQuantity < 10)
         .forEach((med) => {
           notifs.push({
@@ -100,7 +126,7 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
         });
 
       // Expiring medications
-      medications
+      meds
         .filter((m) => m.expirationDate && m.expirationDate.getTime() - Date.now() < 30 * 24 * 60 * 60 * 1000)
         .forEach((med) => {
           notifs.push({

@@ -122,3 +122,16 @@ export type CaregiverTabParamList = {
   Alerts: undefined;
   Profile: undefined;
 };
+
+// Caregiver alert types
+export interface CaregiverAlert {
+  id: string;
+  seniorId: string;
+  seniorName: string;
+  type: 'missed_dose' | 'low_stock' | 'expiring';
+  medicationId?: string;
+  medicationName?: string;
+  message: string;
+  createdAt: Date;
+  isRead: boolean;
+}

@@ -24,6 +24,9 @@ import { AddScheduleScreen } from '../screens/senior/AddScheduleScreen';
 
 // Caregiver screens
 import { MonitoringDashboard } from '../screens/caregiver/MonitoringDashboard';
+import { SeniorsListScreen } from '../screens/caregiver/SeniorsListScreen';
+import { SeniorDetailScreen } from '../screens/caregiver/SeniorDetailScreen';
+import { AlertsScreen } from '../screens/caregiver/AlertsScreen';
 
 // Shared screens
 import { ProfileScreen } from '../screens/shared/ProfileScreen';
@@ -186,7 +189,7 @@ const CaregiverTabNavigator = () => {
       />
       <CaregiverTab.Screen
         name="Seniors"
-        component={SeniorsPlaceholder}
+        component={SeniorsListScreen}
         options={{
           title: 'Podopieczni',
           headerTitle: 'Moi podopieczni',
@@ -194,7 +197,7 @@ const CaregiverTabNavigator = () => {
       />
       <CaregiverTab.Screen
         name="Alerts"
-        component={AlertsPlaceholder}
+        component={AlertsScreen}
         options={{
           title: 'Powiadomienia',
           headerTitle: 'Powiadomienia',
@@ -212,18 +215,9 @@ const CaregiverTabNavigator = () => {
   );
 };
 
-// Placeholder components for screens in development
-const SeniorsPlaceholder = () => (
-  <View style={styles.placeholder}>
-    <Ionicons name="people-outline" size={48} color={Colors.neutral[300]} />
-  </View>
-);
-
-const AlertsPlaceholder = () => (
-  <View style={styles.placeholder}>
-    <Ionicons name="notifications-outline" size={48} color={Colors.neutral[300]} />
-  </View>
-);
+// No longer needed - using real screens
+// const SeniorsPlaceholder = () => (...)
+// const AlertsPlaceholder = () => (...)
 
 // Auth Stack
 const AuthStack = () => {
@@ -293,6 +287,13 @@ export const AppNavigator = () => {
               options={{
                 headerTitle: 'Połącz z seniorem',
                 presentation: 'modal',
+              }}
+            />
+            <Stack.Screen
+              name="SeniorDetail"
+              component={SeniorDetailScreen}
+              options={{
+                headerTitle: 'Szczegóły podopiecznego',
               }}
             />
           </>

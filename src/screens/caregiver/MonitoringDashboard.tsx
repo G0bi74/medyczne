@@ -10,12 +10,12 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { format, isToday, differenceInMinutes } from 'date-fns';
+import { format, isToday, differenceInMinutes, startOfDay, endOfDay } from 'date-fns';
 import { pl } from 'date-fns/locale';
 import { Card, DoseCard, Button } from '../../components';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '../../constants/theme';
 import { useAuthStore, useCaregiverStore } from '../../store';
-import { User, DoseLog, Medication } from '../../types';
+import { User, DoseLog, Medication, Schedule, DoseStatus } from '../../types';
 import {
   collection,
   query,
@@ -25,15 +25,23 @@ import {
   getDoc,
 } from 'firebase/firestore';
 import { db } from '../../config/firebase';
+import { generateDosesForDate, GeneratedDose } from '../../services/doses/doseGenerator';
 
 interface MonitoringDashboardProps {
   navigation: any;
+}
+
+// Store generated doses per senior
+interface SeniorDoses {
+  [seniorId: string]: GeneratedDose[];
 }
 
 export const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({
   navigation,
 }) => {
   const [refreshing, setRefreshing] = useState(false);
+  const [seniorDoses, setSeniorDoses] = useState<SeniorDoses>({});
+  const [seniorSchedules, setSeniorSchedules] = useState<{ [id: string]: Schedule[] }>({});
   
   const user = useAuthStore((state) => state.user);
   const seniors = useCaregiverStore((state) => state.seniors);
@@ -67,7 +75,10 @@ export const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({
       
       setSeniors(seniorUsers);
 
-      // Load medications and dose logs for each senior
+      const allSeniorDoses: SeniorDoses = {};
+      const allSeniorSchedules: { [id: string]: Schedule[] } = {};
+
+      // Load medications, schedules, and dose statuses for each senior
       for (const senior of seniorUsers) {
         // Load medications
         const medsQuery = query(
@@ -92,35 +103,85 @@ export const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({
         });
         setSeniorMedications(senior.id, medications);
 
-        // Load today's dose logs
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const tomorrow = new Date(today);
-        tomorrow.setDate(tomorrow.getDate() + 1);
-
-        const logsQuery = query(
-          collection(db, 'doseLogs'),
+        // Load schedules
+        const schedsQuery = query(
+          collection(db, 'schedules'),
           where('userId', '==', senior.id)
         );
-        const logsSnapshot = await getDocs(logsQuery);
-        const logs: DoseLog[] = logsSnapshot.docs
-          .map((doc) => {
-            const data = doc.data();
-            return {
-              id: doc.id,
-              scheduleId: data.scheduleId,
-              medicationId: data.medicationId,
-              userId: data.userId,
-              scheduledTime: data.scheduledTime?.toDate() || new Date(),
-              takenAt: data.takenAt?.toDate(),
+        const schedsSnapshot = await getDocs(schedsQuery);
+        const schedules: Schedule[] = schedsSnapshot.docs.map((doc) => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            medicationId: data.medicationId,
+            userId: data.userId,
+            times: data.times || [],
+            daysOfWeek: data.daysOfWeek || [],
+            dosageAmount: data.dosageAmount,
+            startDate: data.startDate?.toDate() || new Date(),
+            endDate: data.endDate?.toDate(),
+            reminderMinutesBefore: data.reminderMinutesBefore || 10,
+            isActive: data.isActive ?? true,
+          };
+        }).filter(s => s.isActive);
+        
+        allSeniorSchedules[senior.id] = schedules;
+
+        // Load dose statuses for today
+        const today = startOfDay(new Date());
+        const tomorrow = endOfDay(today);
+        
+        const statusesQuery = query(
+          collection(db, 'doseStatuses'),
+          where('userId', '==', senior.id)
+        );
+        const statusesSnapshot = await getDocs(statusesQuery);
+        const statusesMap = new Map<string, { status: DoseStatus; takenAt?: Date }>();
+        
+        statusesSnapshot.docs.forEach((doc) => {
+          const data = doc.data();
+          const scheduledTime = data.scheduledTime?.toDate();
+          if (scheduledTime && isToday(scheduledTime)) {
+            statusesMap.set(doc.id, {
               status: data.status,
-              notes: data.notes,
+              takenAt: data.takenAt?.toDate(),
+            });
+          }
+        });
+
+        // Generate today's doses from schedules
+        const todaysDoses = generateDosesForDate(schedules, medications, new Date(), senior.id);
+        
+        // Apply saved statuses
+        const dosesWithStatuses = todaysDoses.map(dose => {
+          const savedStatus = statusesMap.get(dose.id);
+          if (savedStatus) {
+            return {
+              ...dose,
+              status: savedStatus.status,
+              takenAt: savedStatus.takenAt,
             };
-          })
-          .filter((log) => isToday(log.scheduledTime));
-          
-        setSeniorDoseLogs(senior.id, logs);
+          }
+          return dose;
+        });
+        
+        allSeniorDoses[senior.id] = dosesWithStatuses;
+        
+        // Also set as DoseLog for compatibility with existing code
+        const logsForStore: DoseLog[] = dosesWithStatuses.map(dose => ({
+          id: dose.id,
+          scheduleId: dose.scheduleId,
+          medicationId: dose.medicationId,
+          userId: dose.userId,
+          scheduledTime: dose.scheduledTime,
+          takenAt: dose.takenAt,
+          status: dose.status,
+        }));
+        setSeniorDoseLogs(senior.id, logsForStore);
       }
+      
+      setSeniorDoses(allSeniorDoses);
+      setSeniorSchedules(allSeniorSchedules);
     } catch (error) {
       console.error('Error loading caregiver data:', error);
     }
@@ -139,17 +200,17 @@ export const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({
   };
 
   const getSeniorStatus = (seniorId: string) => {
-    const logs = seniorDoseLogs[seniorId] || [];
-    const pending = logs.filter((l) => l.status === 'pending');
-    const taken = logs.filter((l) => l.status === 'taken');
-    const missed = logs.filter((l) => l.status === 'missed');
+    const doses = seniorDoses[seniorId] || seniorDoseLogs[seniorId] || [];
+    const pending = doses.filter((d) => d.status === 'pending');
+    const taken = doses.filter((d) => d.status === 'taken');
+    const missed = doses.filter((d) => d.status === 'missed');
     
     return {
-      total: logs.length,
+      total: doses.length,
       pending: pending.length,
       taken: taken.length,
       missed: missed.length,
-      percentage: logs.length > 0 ? Math.round((taken.length / logs.length) * 100) : 0,
+      percentage: doses.length > 0 ? Math.round((taken.length / doses.length) * 100) : 0,
     };
   };
 
@@ -157,27 +218,27 @@ export const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({
     const alerts: { senior: User; dose: DoseLog; medication?: Medication }[] = [];
     
     for (const senior of seniors) {
-      const logs = seniorDoseLogs[senior.id] || [];
+      const doses = seniorDoses[senior.id] || seniorDoseLogs[senior.id] || [];
       const medications = seniorMedications[senior.id] || [];
       
-      for (const log of logs) {
+      for (const dose of doses) {
         // Check if dose is overdue (pending and past scheduled time by more than 30 minutes)
         if (
-          log.status === 'pending' &&
-          differenceInMinutes(new Date(), log.scheduledTime) > 30
+          dose.status === 'pending' &&
+          differenceInMinutes(new Date(), dose.scheduledTime) > 30
         ) {
           alerts.push({
             senior,
-            dose: { ...log, status: 'missed' },
-            medication: medications.find((m) => m.id === log.medicationId),
+            dose: { ...dose, status: 'missed' },
+            medication: medications.find((m) => m.id === dose.medicationId),
           });
         }
         
-        if (log.status === 'missed') {
+        if (dose.status === 'missed') {
           alerts.push({
             senior,
-            dose: log,
-            medication: medications.find((m) => m.id === log.medicationId),
+            dose: dose as DoseLog,
+            medication: medications.find((m) => m.id === dose.medicationId),
           });
         }
       }
@@ -609,9 +670,9 @@ const styles = StyleSheet.create({
     maxWidth: 280,
   },
   tipsCard: {
-    backgroundColor: Colors.warning + '10',
+    backgroundColor: '#FFF8E1',
     borderWidth: 1,
-    borderColor: Colors.warning + '30',
+    borderColor: '#FFE082',
   },
   tipsHeader: {
     flexDirection: 'row',
@@ -621,7 +682,7 @@ const styles = StyleSheet.create({
   },
   tipsTitle: {
     ...Typography.bodyBold,
-    color: Colors.warning,
+    color: '#F59E0B',
   },
   tipsText: {
     ...Typography.caption,

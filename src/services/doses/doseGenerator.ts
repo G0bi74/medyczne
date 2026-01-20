@@ -1,5 +1,5 @@
 // Dose generation service - creates virtual doses from schedules
-// This avoids needing to store DoseLogs in Firebase for each day
+// Stores dose statuses in Firebase for persistence
 
 import { Schedule, Medication, DoseLog, DoseStatus } from '../../types';
 import { 
@@ -14,6 +14,17 @@ import {
   addDays,
   getDay,
 } from 'date-fns';
+import {
+  collection,
+  doc,
+  getDoc,
+  setDoc,
+  getDocs,
+  query,
+  where,
+  Timestamp,
+} from 'firebase/firestore';
+import { db } from '../../config/firebase';
 
 export interface GeneratedDose {
   id: string;
@@ -27,8 +38,8 @@ export interface GeneratedDose {
   medication?: Medication;
 }
 
-// Local storage for taken/skipped doses (in-memory for now, can be persisted)
-const takenDoses: Map<string, { status: DoseStatus; takenAt?: Date }> = new Map();
+// In-memory cache for faster access (synced with Firebase)
+const doseStatusCache: Map<string, { status: DoseStatus; takenAt?: Date }> = new Map();
 
 /**
  * Generate a unique key for a dose based on schedule, date and time
@@ -76,6 +87,65 @@ const parseTimeToDate = (date: Date, timeStr: string): Date => {
 };
 
 /**
+ * Load dose statuses from Firebase for a user and date range
+ */
+export const loadDoseStatusesFromFirebase = async (userId: string, dateStart: Date, dateEnd: Date): Promise<void> => {
+  try {
+    console.log('[DoseGenerator] Loading dose statuses from Firebase...');
+    const q = query(
+      collection(db, 'doseStatuses'),
+      where('userId', '==', userId)
+    );
+    const snapshot = await getDocs(q);
+    
+    snapshot.docs.forEach((doc) => {
+      const data = doc.data();
+      const scheduledTime = data.scheduledTime?.toDate();
+      
+      // Only cache if within date range
+      if (scheduledTime && scheduledTime >= dateStart && scheduledTime <= dateEnd) {
+        doseStatusCache.set(doc.id, {
+          status: data.status,
+          takenAt: data.takenAt?.toDate(),
+        });
+      }
+    });
+    
+    console.log('[DoseGenerator] Loaded', doseStatusCache.size, 'dose statuses from Firebase');
+  } catch (error) {
+    console.error('[DoseGenerator] Error loading dose statuses:', error);
+  }
+};
+
+/**
+ * Save dose status to Firebase
+ */
+const saveDoseStatusToFirebase = async (
+  doseId: string,
+  userId: string,
+  scheduleId: string,
+  medicationId: string,
+  scheduledTime: Date,
+  status: DoseStatus,
+  takenAt?: Date
+): Promise<void> => {
+  try {
+    await setDoc(doc(db, 'doseStatuses', doseId), {
+      userId,
+      scheduleId,
+      medicationId,
+      scheduledTime: Timestamp.fromDate(scheduledTime),
+      status,
+      takenAt: takenAt ? Timestamp.fromDate(takenAt) : null,
+      updatedAt: Timestamp.now(),
+    });
+    console.log('[DoseGenerator] Saved dose status to Firebase:', doseId, status);
+  } catch (error) {
+    console.error('[DoseGenerator] Error saving dose status:', error);
+  }
+};
+
+/**
  * Generate doses for a specific date from schedules
  */
 export const generateDosesForDate = (
@@ -98,8 +168,8 @@ export const generateDosesForDate = (
       const scheduledTime = parseTimeToDate(date, time);
       const doseKey = getDoseKey(schedule.id, date, time);
       
-      // Check if this dose was already taken/skipped
-      const savedStatus = takenDoses.get(doseKey);
+      // Check if this dose was already taken/skipped (from cache or Firebase)
+      const savedStatus = doseStatusCache.get(doseKey);
       
       let status: DoseStatus = 'pending';
       let takenAt: Date | undefined;
@@ -168,31 +238,70 @@ export const generateWeekDoses = (
 };
 
 /**
- * Mark a dose as taken
+ * Mark a dose as taken - saves to both cache and Firebase
  */
 export const markDoseAsTakenLocal = (doseId: string): void => {
-  takenDoses.set(doseId, { status: 'taken', takenAt: new Date() });
+  const takenAt = new Date();
+  doseStatusCache.set(doseId, { status: 'taken', takenAt });
+};
+
+/**
+ * Mark a dose as taken with full info for Firebase persistence
+ */
+export const markDoseAsTakenWithPersistence = async (
+  dose: GeneratedDose
+): Promise<void> => {
+  const takenAt = new Date();
+  doseStatusCache.set(dose.id, { status: 'taken', takenAt });
+  
+  await saveDoseStatusToFirebase(
+    dose.id,
+    dose.userId,
+    dose.scheduleId,
+    dose.medicationId,
+    dose.scheduledTime,
+    'taken',
+    takenAt
+  );
 };
 
 /**
  * Mark a dose as skipped
  */
 export const markDoseAsSkippedLocal = (doseId: string): void => {
-  takenDoses.set(doseId, { status: 'skipped' });
+  doseStatusCache.set(doseId, { status: 'skipped' });
+};
+
+/**
+ * Mark a dose as skipped with full info for Firebase persistence
+ */
+export const markDoseAsSkippedWithPersistence = async (
+  dose: GeneratedDose
+): Promise<void> => {
+  doseStatusCache.set(dose.id, { status: 'skipped' });
+  
+  await saveDoseStatusToFirebase(
+    dose.id,
+    dose.userId,
+    dose.scheduleId,
+    dose.medicationId,
+    dose.scheduledTime,
+    'skipped'
+  );
 };
 
 /**
  * Get dose status
  */
 export const getDoseStatus = (doseId: string): { status: DoseStatus; takenAt?: Date } | null => {
-  return takenDoses.get(doseId) || null;
+  return doseStatusCache.get(doseId) || null;
 };
 
 /**
  * Clear all saved dose statuses (for testing)
  */
 export const clearDoseStatuses = (): void => {
-  takenDoses.clear();
+  doseStatusCache.clear();
 };
 
 /**

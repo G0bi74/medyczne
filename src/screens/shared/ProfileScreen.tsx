@@ -264,7 +264,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
             icon="qr-code-outline"
             title="Skanuj kod zaproszenia"
             subtitle="Połącz się z seniorem"
-            onPress={() => navigation.navigate('ScanInvitation')}
+            onPress={() => navigation.navigate('LinkCaregiver')}
           />
         </Card>
       )}

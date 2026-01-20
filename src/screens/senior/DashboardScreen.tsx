@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { format } from 'date-fns';
+import { format, startOfDay, addDays } from 'date-fns';
 import { pl } from 'date-fns/locale';
 import { Card, DoseCard, InteractionAlert } from '../../components';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '../../constants/theme';
@@ -24,9 +24,10 @@ import {
 import {
   generateTodaysDoses,
   GeneratedDose,
-  markDoseAsTakenLocal,
-  markDoseAsSkippedLocal,
+  markDoseAsTakenWithPersistence,
+  markDoseAsSkippedWithPersistence,
   calculateProgress,
+  loadDoseStatusesFromFirebase,
 } from '../../services/doses/doseGenerator';
 import { DrugInteraction } from '../../types';
 
@@ -49,6 +50,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
     if (!user) return;
     
     try {
+      // First, load saved dose statuses from Firebase for today
+      const today = startOfDay(new Date());
+      const tomorrow = addDays(today, 1);
+      await loadDoseStatusesFromFirebase(user.id, today, tomorrow);
+      
       const [meds, scheds] = await Promise.all([
         getMedicationsByUser(user.id),
         getSchedulesByUser(user.id),
@@ -92,7 +98,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
   const updateMedicationInStore = useMedicationStore((state) => state.updateMedication);
 
   const handleTakeDose = async (dose: GeneratedDose) => {
-    markDoseAsTakenLocal(dose.id);
+    // Save to Firebase for persistence
+    await markDoseAsTakenWithPersistence(dose);
     
     // Update dose status in local state
     setTodaysDoses(prev => 
@@ -115,7 +122,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
   };
 
   const handleSkipDose = async (dose: GeneratedDose) => {
-    markDoseAsSkippedLocal(dose.id);
+    // Save to Firebase for persistence
+    await markDoseAsSkippedWithPersistence(dose);
+    
     // Update local state
     setTodaysDoses(prev => 
       prev.map(d => d.id === dose.id ? { ...d, status: 'skipped' } : d)

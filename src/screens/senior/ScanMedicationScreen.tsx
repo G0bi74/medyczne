@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   Alert,
   ActivityIndicator,
+  ScrollView,
 } from 'react-native';
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,6 +17,22 @@ import { addMedication } from '../../services/api/medicationService';
 import { useAuthStore, useMedicationStore } from '../../store';
 import { Button, Card, Input, InteractionAlert } from '../../components';
 import { MedicationInfo, DrugInteraction } from '../../types';
+
+// Lista popularnych leków do testów
+const TEST_MEDICATIONS = [
+  { name: 'Apap', substance: 'Paracetamol', dosage: '500mg', form: 'tablet' },
+  { name: 'Ibuprom', substance: 'Ibuprofen', dosage: '200mg', form: 'tablet' },
+  { name: 'Aspirin', substance: 'Kwas acetylosalicylowy', dosage: '500mg', form: 'tablet' },
+  { name: 'Rutinoscorbin', substance: 'Witamina C + Rutyna', dosage: '100mg', form: 'tablet' },
+  { name: 'Xanax', substance: 'Alprazolam', dosage: '0.25mg', form: 'tablet' },
+  { name: 'Metformin', substance: 'Metformina', dosage: '500mg', form: 'tablet' },
+  { name: 'Amlodipine', substance: 'Amlodypina', dosage: '5mg', form: 'tablet' },
+  { name: 'Omeprazol', substance: 'Omeprazol', dosage: '20mg', form: 'capsule' },
+  { name: 'Atorvastatin', substance: 'Atorwastatyna', dosage: '20mg', form: 'tablet' },
+  { name: 'Warfarin', substance: 'Warfaryna', dosage: '5mg', form: 'tablet' },
+  { name: 'Bisoprolol', substance: 'Bisoprolol', dosage: '5mg', form: 'tablet' },
+  { name: 'Ramipril', substance: 'Ramipryl', dosage: '5mg', form: 'tablet' },
+];
 
 interface ScanMedicationScreenProps {
   navigation: any;
@@ -33,12 +50,14 @@ export const ScanMedicationScreen: React.FC<ScanMedicationScreenProps> = ({
   const [interactions, setInteractions] = useState<DrugInteraction[]>([]);
   const [loading, setLoading] = useState(false);
   const [flashOn, setFlashOn] = useState(false);
+  const [showTestList, setShowTestList] = useState(false);
   
   // Manual entry fields
   const [manualName, setManualName] = useState('');
   const [manualSubstance, setManualSubstance] = useState('');
   const [manualDosage, setManualDosage] = useState('');
   const [packageSize, setPackageSize] = useState('30');
+  const [expirationDate, setExpirationDate] = useState('');
   
   const user = useAuthStore((state) => state.user);
   const medications = useMedicationStore((state) => state.medications);
@@ -85,6 +104,15 @@ export const ScanMedicationScreen: React.FC<ScanMedicationScreenProps> = ({
     
     setScanState('adding');
     
+    // Parse expiration date if provided
+    let parsedExpirationDate: Date | undefined;
+    if (expirationDate) {
+      const [year, month, day] = expirationDate.split('-').map(Number);
+      if (year && month) {
+        parsedExpirationDate = new Date(year, month - 1, day || 1);
+      }
+    }
+    
     const medicationToAdd: any = {
       userId: user?.id || 'demo-user',
       barcode: scannedBarcode || '',
@@ -97,6 +125,7 @@ export const ScanMedicationScreen: React.FC<ScanMedicationScreenProps> = ({
       manufacturer: medicationInfo?.manufacturer,
       leafletUrl: medicationInfo?.leafletUrl,
       addedAt: new Date(),
+      expirationDate: parsedExpirationDate,
     };
     
     try {
@@ -170,6 +199,22 @@ export const ScanMedicationScreen: React.FC<ScanMedicationScreenProps> = ({
     setManualName('');
     setManualSubstance('');
     setManualDosage('');
+    setExpirationDate('');
+    setShowTestList(false);
+  };
+
+  const selectTestMedication = (med: typeof TEST_MEDICATIONS[0]) => {
+    setManualName(med.name);
+    setManualSubstance(med.substance);
+    setManualDosage(med.dosage);
+    setShowTestList(false);
+    
+    // Check for interactions
+    const interactionResult = checkInteractions(
+      { activeSubstance: med.substance },
+      medications
+    );
+    setInteractions(interactionResult.interactions);
   };
 
   if (!permission) {
@@ -208,12 +253,17 @@ export const ScanMedicationScreen: React.FC<ScanMedicationScreenProps> = ({
             <Ionicons name="arrow-back" size={24} color={Colors.text.primary} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>
-            {scanState === 'found' ? 'Znaleziono lek' : 'Dodaj lek ręcznie'}
+            {scanState === 'found' ? 'Znaleziono lek' : 'Dodaj lek'}
           </Text>
           <View style={{ width: 40 }} />
         </View>
 
-        <View style={styles.resultContent}>
+        <ScrollView 
+          style={styles.resultContent} 
+          contentContainerStyle={styles.resultContentContainer}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
           {scannedBarcode && (
             <Text style={styles.barcodeText}>Kod: {scannedBarcode}</Text>
           )}
@@ -253,6 +303,13 @@ export const ScanMedicationScreen: React.FC<ScanMedicationScreenProps> = ({
                 keyboardType="number-pad"
                 placeholder="30"
               />
+
+              <Input
+                label="Data ważności (RRRR-MM-DD)"
+                value={expirationDate}
+                onChangeText={setExpirationDate}
+                placeholder="np. 2026-12-31"
+              />
             </Card>
           )}
 
@@ -260,10 +317,59 @@ export const ScanMedicationScreen: React.FC<ScanMedicationScreenProps> = ({
             <Card style={styles.manualEntryCard}>
               <View style={styles.notFoundHeader}>
                 <Ionicons name="help-circle-outline" size={48} color={Colors.warning} />
-                <Text style={styles.notFoundTitle}>Nie znaleziono leku</Text>
+                <Text style={styles.notFoundTitle}>Dodaj lek</Text>
                 <Text style={styles.notFoundText}>
-                  Wprowadź dane leku ręcznie
+                  Wybierz z listy lub wprowadź ręcznie
                 </Text>
+              </View>
+
+              {/* Test medications dropdown */}
+              <TouchableOpacity 
+                style={styles.testListToggle}
+                onPress={() => setShowTestList(!showTestList)}
+              >
+                <Ionicons 
+                  name="list" 
+                  size={20} 
+                  color={Colors.primary[500]} 
+                />
+                <Text style={styles.testListToggleText}>
+                  Wybierz z listy popularnych leków
+                </Text>
+                <Ionicons 
+                  name={showTestList ? 'chevron-up' : 'chevron-down'} 
+                  size={20} 
+                  color={Colors.primary[500]} 
+                />
+              </TouchableOpacity>
+
+              {showTestList && (
+                <ScrollView style={styles.testListContainer} nestedScrollEnabled>
+                  {TEST_MEDICATIONS.map((med, index) => (
+                    <TouchableOpacity
+                      key={index}
+                      style={styles.testListItem}
+                      onPress={() => selectTestMedication(med)}
+                    >
+                      <View style={styles.testListItemIcon}>
+                        <Ionicons name="medical" size={16} color={Colors.primary[500]} />
+                      </View>
+                      <View style={styles.testListItemContent}>
+                        <Text style={styles.testListItemName}>{med.name}</Text>
+                        <Text style={styles.testListItemDetails}>
+                          {med.substance} • {med.dosage}
+                        </Text>
+                      </View>
+                      <Ionicons name="add-circle" size={24} color={Colors.primary[500]} />
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
+
+              <View style={styles.orDivider}>
+                <View style={styles.orLine} />
+                <Text style={styles.orText}>lub wprowadź ręcznie</Text>
+                <View style={styles.orLine} />
               </View>
 
               <Input
@@ -293,6 +399,13 @@ export const ScanMedicationScreen: React.FC<ScanMedicationScreenProps> = ({
                 onChangeText={setPackageSize}
                 keyboardType="number-pad"
                 placeholder="30"
+              />
+
+              <Input
+                label="Data ważności (RRRR-MM-DD)"
+                value={expirationDate}
+                onChangeText={setExpirationDate}
+                placeholder="np. 2026-12-31"
               />
             </Card>
           )}
@@ -329,7 +442,7 @@ export const ScanMedicationScreen: React.FC<ScanMedicationScreenProps> = ({
               style={{ marginTop: Spacing.sm }}
             />
           </View>
-        </View>
+        </ScrollView>
       </View>
     );
   }
@@ -559,6 +672,9 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: Spacing.lg,
   },
+  resultContentContainer: {
+    paddingBottom: Spacing.xxl,
+  },
   barcodeText: {
     ...Typography.caption,
     color: Colors.text.tertiary,
@@ -623,6 +739,70 @@ const styles = StyleSheet.create({
   notFoundText: {
     ...Typography.body,
     color: Colors.text.secondary,
+  },
+  testListToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    backgroundColor: Colors.primary[50],
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    borderRadius: BorderRadius.md,
+    marginBottom: Spacing.md,
+  },
+  testListToggleText: {
+    ...Typography.bodyBold,
+    color: Colors.primary[600],
+    flex: 1,
+  },
+  testListContainer: {
+    maxHeight: 200,
+    backgroundColor: Colors.neutral[50],
+    borderRadius: BorderRadius.md,
+    marginBottom: Spacing.md,
+  },
+  testListItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: Spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.neutral[100],
+    gap: Spacing.sm,
+  },
+  testListItemIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.primary[100],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  testListItemContent: {
+    flex: 1,
+  },
+  testListItemName: {
+    ...Typography.bodyBold,
+    color: Colors.text.primary,
+  },
+  testListItemDetails: {
+    ...Typography.caption,
+    color: Colors.text.secondary,
+  },
+  orDivider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: Spacing.sm,
+    gap: Spacing.sm,
+  },
+  orLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: Colors.neutral[200],
+  },
+  orText: {
+    ...Typography.caption,
+    color: Colors.text.tertiary,
   },
   interactionsSection: {
     marginBottom: Spacing.lg,

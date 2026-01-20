@@ -14,6 +14,8 @@ import { useAuthStore, useMedicationStore, useScheduleStore } from '../../store'
 import { addSchedule } from '../../services/api/medicationService';
 import { scheduleDoseReminder, scheduleAllReminders } from '../../services/notifications/pushService';
 import { DAYS_OF_WEEK, COMMON_DOSE_TIMES, REMINDER_OPTIONS } from '../../constants/medications';
+import { addDays, addWeeks, addMonths, format } from 'date-fns';
+import { pl } from 'date-fns/locale';
 
 interface AddScheduleScreenProps {
   navigation: any;
@@ -23,6 +25,15 @@ interface AddScheduleScreenProps {
     };
   };
 }
+
+// Duration options
+const DURATION_OPTIONS = [
+  { value: 'indefinite', label: 'Bez ograniczeń', days: null },
+  { value: '7days', label: '7 dni', days: 7 },
+  { value: '14days', label: '14 dni', days: 14 },
+  { value: '30days', label: '30 dni', days: 30 },
+  { value: '3months', label: '3 miesiące', days: 90 },
+];
 
 export const AddScheduleScreen: React.FC<AddScheduleScreenProps> = ({
   navigation,
@@ -35,6 +46,7 @@ export const AddScheduleScreen: React.FC<AddScheduleScreenProps> = ({
   const [selectedDays, setSelectedDays] = useState<number[]>([1, 2, 3, 4, 5, 6, 7]); // All days
   const [reminderMinutes, setReminderMinutes] = useState(10);
   const [customTime, setCustomTime] = useState('');
+  const [selectedDuration, setSelectedDuration] = useState('indefinite');
   const [loading, setLoading] = useState(false);
 
   const user = useAuthStore((state) => state.user);
@@ -101,13 +113,23 @@ export const AddScheduleScreen: React.FC<AddScheduleScreenProps> = ({
 
     setLoading(true);
     try {
+      // Calculate end date based on duration
+      const startDate = new Date();
+      let endDate: Date | undefined = undefined;
+      
+      const durationOption = DURATION_OPTIONS.find(d => d.value === selectedDuration);
+      if (durationOption && durationOption.days !== null) {
+        endDate = addDays(startDate, durationOption.days);
+      }
+      
       const newSchedule = await addSchedule({
         medicationId,
         userId: user.id,
         times: selectedTimes,
         daysOfWeek: selectedDays,
         dosageAmount,
-        startDate: new Date(),
+        startDate,
+        endDate,
         reminderMinutesBefore: reminderMinutes,
         isActive: true,
       });
@@ -329,6 +351,48 @@ export const AddScheduleScreen: React.FC<AddScheduleScreenProps> = ({
         </View>
       </View>
 
+      {/* Duration Settings */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Czas trwania leczenia</Text>
+        <Text style={styles.sectionSubtitle}>
+          Przez ile dni przyjmować ten lek?
+        </Text>
+        
+        <View style={styles.durationOptions}>
+          {DURATION_OPTIONS.map((option) => (
+            <TouchableOpacity
+              key={option.value}
+              style={[
+                styles.durationOption,
+                selectedDuration === option.value && styles.durationOptionActive,
+              ]}
+              onPress={() => setSelectedDuration(option.value)}
+            >
+              <Ionicons
+                name={selectedDuration === option.value ? 'radio-button-on' : 'radio-button-off'}
+                size={20}
+                color={selectedDuration === option.value ? Colors.primary[500] : Colors.text.tertiary}
+              />
+              <View style={styles.durationOptionContent}>
+                <Text
+                  style={[
+                    styles.durationOptionText,
+                    selectedDuration === option.value && styles.durationOptionTextActive,
+                  ]}
+                >
+                  {option.label}
+                </Text>
+                {option.days !== null && selectedDuration === option.value && (
+                  <Text style={styles.durationEndDate}>
+                    Do: {format(addDays(new Date(), option.days), 'd MMMM yyyy', { locale: pl })}
+                  </Text>
+                )}
+              </View>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+
       {/* Reminder Settings */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Przypomnienie</Text>
@@ -376,6 +440,16 @@ export const AddScheduleScreen: React.FC<AddScheduleScreenProps> = ({
             {selectedDays.length === 7 
               ? 'Codziennie' 
               : selectedDays.map(d => DAYS_OF_WEEK.find(day => day.value === d)?.label).join(', ')}
+          </Text>
+        </Text>
+        <Text style={styles.summaryText}>
+          Czas trwania: <Text style={styles.summaryBold}>
+            {(() => {
+              const option = DURATION_OPTIONS.find(d => d.value === selectedDuration);
+              if (!option) return 'Bez ograniczeń';
+              if (option.days === null) return 'Bez ograniczeń';
+              return `${option.label} (do ${format(addDays(new Date(), option.days), 'd.MM.yyyy')})`;
+            })()}
           </Text>
         </Text>
       </Card>
@@ -598,6 +672,45 @@ const styles = StyleSheet.create({
   reminderOptionTextActive: {
     color: Colors.text.primary,
     fontWeight: '500',
+  },
+  sectionSubtitle: {
+    ...Typography.caption,
+    color: Colors.text.secondary,
+    marginBottom: Spacing.sm,
+  },
+  durationOptions: {
+    gap: Spacing.sm,
+  },
+  durationOption: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    backgroundColor: Colors.background.primary,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: Colors.neutral[200],
+  },
+  durationOptionActive: {
+    borderColor: Colors.primary[500],
+    backgroundColor: Colors.primary[50],
+  },
+  durationOptionContent: {
+    flex: 1,
+  },
+  durationOptionText: {
+    ...Typography.body,
+    color: Colors.text.secondary,
+  },
+  durationOptionTextActive: {
+    color: Colors.text.primary,
+    fontWeight: '500',
+  },
+  durationEndDate: {
+    ...Typography.caption,
+    color: Colors.primary[600],
+    marginTop: 2,
   },
   summaryCard: {
     marginHorizontal: Spacing.lg,

@@ -1,4 +1,4 @@
-// Proste reguły Firestore dla Apteczka Seniora
+// Reguły Firestore dla Apteczka Seniora
 // SKOPIUJ TĘ ZAWARTOŚĆ DO: Firebase Console -> Firestore Database -> Rules
 
 rules_version = '2';
@@ -17,46 +17,81 @@ service cloud.firestore {
     
     // ===== UŻYTKOWNICY =====
     match /users/{userId} {
-      // Użytkownik może czytać i pisać tylko swoje dane
-      allow read, write: if isAuthenticated() && isOwner(userId);
+      // Każdy zalogowany użytkownik może czytać profile innych użytkowników
+      // (potrzebne do łączenia opiekun-senior i wyświetlania danych)
+      allow read: if isAuthenticated();
+      
+      // Użytkownik może tworzyć i w pełni edytować tylko swój profil
+      allow create, delete: if isAuthenticated() && isOwner(userId);
+      
+      // Własny profil - pełna edycja
+      allow update: if isAuthenticated() && isOwner(userId);
+      
+      // Inni użytkownicy mogą aktualizować TYLKO pola caregiverIds i seniorIds
+      // (używane podczas łączenia kont opiekun-senior)
+      allow update: if isAuthenticated() && 
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['caregiverIds', 'seniorIds']);
     }
     
     // ===== LEKI =====
     match /medications/{medicationId} {
-      // Użytkownik może zarządzać swoimi lekami
+      // Właściciel może wszystko
       allow read, write: if isAuthenticated() && 
-        (resource == null || resource.data.userId == request.auth.uid);
+        resource.data.userId == request.auth.uid;
       
-      // Pozwól na tworzenie nowych dokumentów
+      // Tworzenie nowych - musi być właścicielem
       allow create: if isAuthenticated() && 
         request.resource.data.userId == request.auth.uid;
+      
+      // Opiekun może czytać leki swoich podopiecznych
+      allow read: if isAuthenticated();
     }
     
     // ===== HARMONOGRAMY =====
     match /schedules/{scheduleId} {
-      // Użytkownik może zarządzać swoimi harmonogramami
+      // Właściciel może wszystko
       allow read, write: if isAuthenticated() && 
-        (resource == null || resource.data.userId == request.auth.uid);
+        resource.data.userId == request.auth.uid;
       
-      // Pozwól na tworzenie nowych dokumentów
+      // Tworzenie nowych
       allow create: if isAuthenticated() && 
         request.resource.data.userId == request.auth.uid;
+      
+      // Opiekun może czytać
+      allow read: if isAuthenticated();
     }
     
     // ===== LOGI DAWEK =====
     match /doseLogs/{logId} {
-      // Użytkownik może zarządzać swoimi logami
+      // Właściciel może wszystko
       allow read, write: if isAuthenticated() && 
-        (resource == null || resource.data.userId == request.auth.uid);
+        resource.data.userId == request.auth.uid;
       
-      // Pozwól na tworzenie nowych dokumentów
+      // Tworzenie nowych
+      allow create: if isAuthenticated() && 
+        request.resource.data.userId == request.auth.uid;
+      
+      // Opiekun może czytać
+      allow read: if isAuthenticated();
+    }
+    
+    // ===== STATUSY DAWEK =====
+    match /doseStatuses/{statusId} {
+      // Każdy zalogowany może czytać (opiekun potrzebuje widzieć statusy seniora)
+      allow read: if isAuthenticated();
+      
+      // Właściciel może pisać
+      allow write: if isAuthenticated() && 
+        resource.data.userId == request.auth.uid;
+      
+      // Tworzenie nowych - musi być właścicielem
       allow create: if isAuthenticated() && 
         request.resource.data.userId == request.auth.uid;
     }
     
     // ===== ZAPROSZENIA =====
     match /invitations/{code} {
-      // Wszyscy zalogowani mogą czytać i tworzyć zaproszenia
+      // Wszyscy zalogowani mogą czytać i tworzyć/edytować zaproszenia
       allow read, write: if isAuthenticated();
     }
   }

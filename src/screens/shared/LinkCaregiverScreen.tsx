@@ -24,6 +24,7 @@ export const LinkCaregiverScreen: React.FC<LinkCaregiverScreenProps> = ({
   navigation,
 }) => {
   const user = useAuthStore((state) => state.user);
+  const setUser = useAuthStore((state) => state.setUser);
   const [invitationCode, setInvitationCode] = useState('');
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -90,6 +91,7 @@ export const LinkCaregiverScreen: React.FC<LinkCaregiverScreenProps> = ({
     setLoading(true);
     try {
       const code = invitationCode.trim().toUpperCase();
+      console.log('[LinkCaregiver] Checking invitation code:', code);
       
       // Check if code exists
       const invitationDoc = await getDoc(doc(db, 'invitations', code));
@@ -100,6 +102,7 @@ export const LinkCaregiverScreen: React.FC<LinkCaregiverScreenProps> = ({
       }
 
       const invitation = invitationDoc.data();
+      console.log('[LinkCaregiver] Invitation found:', { seniorId: invitation.seniorId, seniorName: invitation.seniorName });
 
       // Check if code is expired
       if (invitation.expiresAt.toDate() < new Date()) {
@@ -114,6 +117,7 @@ export const LinkCaregiverScreen: React.FC<LinkCaregiverScreenProps> = ({
       }
 
       // Link senior to caregiver
+      console.log('[LinkCaregiver] Linking accounts...');
       await linkSeniorToCaregiver(invitation.seniorId, user.id);
 
       // Mark code as used
@@ -123,15 +127,27 @@ export const LinkCaregiverScreen: React.FC<LinkCaregiverScreenProps> = ({
         usedBy: user.id,
         usedAt: new Date(),
       });
+      
+      // Update local user state with new seniorId
+      const newSeniorIds = [...(user.seniorIds || []), invitation.seniorId];
+      setUser({ ...user, seniorIds: newSeniorIds });
+      console.log('[LinkCaregiver] Local state updated with new seniorIds:', newSeniorIds);
 
       Alert.alert(
         'Sukces!',
         `Zostałeś połączony z ${invitation.seniorName}. Możesz teraz monitorować przyjmowanie leków.`,
         [{ text: 'OK', onPress: () => navigation.goBack() }]
       );
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error linking:', error);
-      Alert.alert('Błąd', 'Nie udało się połączyć kont');
+      console.error('Error code:', error.code);
+      console.error('Error message:', error.message);
+      
+      let message = 'Nie udało się połączyć kont';
+      if (error.code === 'permission-denied') {
+        message = 'Brak uprawnień. Sprawdź reguły Firebase.';
+      }
+      Alert.alert('Błąd', message);
     } finally {
       setLoading(false);
     }

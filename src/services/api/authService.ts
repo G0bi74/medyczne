@@ -203,27 +203,52 @@ export const linkSeniorToCaregiver = async (
   seniorId: string,
   caregiverId: string
 ): Promise<void> => {
-  // Update senior's caregiverIds
-  const seniorDoc = await getDoc(doc(db, 'users', seniorId));
-  if (seniorDoc.exists()) {
-    const seniorData = seniorDoc.data();
-    const caregiverIds = seniorData.caregiverIds || [];
-    if (!caregiverIds.includes(caregiverId)) {
-      await updateDoc(doc(db, 'users', seniorId), {
-        caregiverIds: [...caregiverIds, caregiverId],
-      });
+  console.log('[AuthService] Linking senior:', seniorId, 'to caregiver:', caregiverId);
+  
+  try {
+    // Update senior's caregiverIds
+    console.log('[AuthService] Updating senior caregiverIds...');
+    const seniorDoc = await getDoc(doc(db, 'users', seniorId));
+    if (seniorDoc.exists()) {
+      const seniorData = seniorDoc.data();
+      const caregiverIds = seniorData.caregiverIds || [];
+      if (!caregiverIds.includes(caregiverId)) {
+        await updateDoc(doc(db, 'users', seniorId), {
+          caregiverIds: [...caregiverIds, caregiverId],
+        });
+        console.log('[AuthService] Senior caregiverIds updated');
+      } else {
+        console.log('[AuthService] Caregiver already in senior caregiverIds');
+      }
+    } else {
+      console.error('[AuthService] Senior document not found');
+      throw new Error('Senior nie istnieje');
     }
-  }
 
-  // Update caregiver's seniorIds
-  const caregiverDoc = await getDoc(doc(db, 'users', caregiverId));
-  if (caregiverDoc.exists()) {
-    const caregiverData = caregiverDoc.data();
-    const seniorIds = caregiverData.seniorIds || [];
-    if (!seniorIds.includes(seniorId)) {
-      await updateDoc(doc(db, 'users', caregiverId), {
-        seniorIds: [...seniorIds, seniorId],
-      });
+    // Update caregiver's seniorIds
+    console.log('[AuthService] Updating caregiver seniorIds...');
+    const caregiverDoc = await getDoc(doc(db, 'users', caregiverId));
+    if (caregiverDoc.exists()) {
+      const caregiverData = caregiverDoc.data();
+      const seniorIds = caregiverData.seniorIds || [];
+      if (!seniorIds.includes(seniorId)) {
+        await updateDoc(doc(db, 'users', caregiverId), {
+          seniorIds: [...seniorIds, seniorId],
+        });
+        console.log('[AuthService] Caregiver seniorIds updated');
+      } else {
+        console.log('[AuthService] Senior already in caregiver seniorIds');
+      }
+    } else {
+      console.error('[AuthService] Caregiver document not found');
+      throw new Error('Opiekun nie istnieje');
     }
+    
+    console.log('[AuthService] Link completed successfully');
+  } catch (error: any) {
+    console.error('[AuthService] Error linking accounts:', error);
+    console.error('[AuthService] Error code:', error.code);
+    console.error('[AuthService] Error message:', error.message);
+    throw error;
   }
 };
